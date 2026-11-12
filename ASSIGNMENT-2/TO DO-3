@@ -1,0 +1,48 @@
+#include <algorithm>
+#include <iostream>
+
+const char* lastUsed = "";   
+
+struct Parcel {
+    double kg;
+    bool express = false;
+    bool insured = false;
+};
+namespace {
+double price(double kg, bool express, bool insured)
+{
+    double total = std::max(20.0, 40.0 * kg);   
+    if (express) total += 30.0;
+    if (insured) total += 15.0;
+    return total;
+}
+}
+double charge(double kg, bool express = false, bool insured = false)
+{
+    lastUsed = "charge(double kg, bool, bool)";
+    return price(kg, express, insured);
+}
+double charge(int grams, bool express = false, bool insured = false)
+{
+    lastUsed = "charge(int grams, bool, bool)";
+    return price(grams / 1000.0, express, insured);
+}
+double charge(const Parcel& p)
+{
+    lastUsed = "charge(const Parcel&)";
+    return price(p.kg, p.express, p.insured);
+}
+
+#define SHOW(call) \
+    do { double r = (call); \
+         std::cout << #call << "\n    -> " << lastUsed << " = Rs " << r << '\n'; } while (0)
+
+int main()
+{
+    SHOW(charge(2.5));                       
+    SHOW(charge(2.5, true));             
+    SHOW(charge(2500));                      
+    SHOW(charge(2));                        
+    SHOW(charge(2.0f));                       
+    SHOW(charge(Parcel{3.0, true, true}));    
+}
