@@ -1,0 +1,240 @@
+CLASS:
+#include <iomanip>
+#include <iostream>
+
+struct Transaction {
+    char type;               // 'D' = deposit, 'W' = withdrawal
+    long long amount;
+    long long balanceAfter;
+};
+
+class SavingsAccount {
+public:
+    static constexpr int kMaxTxn = 10;     // change this one constant to keep more
+
+    explicit SavingsAccount(long long accNo, long long opening = 0)
+        : accNo_(accNo), balance_(opening) {}
+
+    // ---- defined INSIDE the class (short accessors) ----
+    long long accountNumber() const { return accNo_; }
+    long long balance() const { return balance_; }
+    int transactionCount() const { return count_; }
+
+    // ---- declared here, defined OUTSIDE with the scope resolution operator ----
+    bool deposit(long long amount);
+    bool withdraw(long long amount);
+    void miniStatement() const;
+
+private:
+    void record(char type, long long amount);
+
+    long long accNo_;
+    long long balance_;
+    Transaction txn_[kMaxTxn] = {};   // circular buffer, private
+    int count_ = 0;                   // how many are stored (max kMaxTxn)
+    int next_ = 0;                    // slot the next transaction is written to
+};
+
+bool SavingsAccount::deposit(long long amount)
+{
+    if (amount <= 0) return false;
+    balance_ += amount;
+    record('D', amount);
+    return true;
+}
+
+bool SavingsAccount::withdraw(long long amount)
+{
+    if (amount <= 0 || amount > balance_) return false;   // rejected: nothing recorded
+    balance_ -= amount;
+    record('W', amount);
+    return true;
+}
+
+void SavingsAccount::record(char type, long long amount)
+{
+    txn_[next_] = Transaction{type, amount, balance_};   // overwrites the oldest when full
+    next_ = (next_ + 1) % kMaxTxn;
+    if (count_ < kMaxTxn) ++count_;
+}
+
+void SavingsAccount::miniStatement() const
+{
+    std::cout << "Mini statement, A/C " << accNo_ << " (last " << count_ << ")\n";
+    int oldest = (next_ + kMaxTxn - count_) % kMaxTxn;   // oldest stored transaction
+    for (int i = 0; i < count_; ++i) {
+        const Transaction& t = txn_[(oldest + i) % kMaxTxn];
+        std::cout << std::setw(3) << i + 1 << ". " << t.type << ' ' << std::setw(6) << t.amount
+                  << "  balance " << std::setw(6) << t.balanceAfter << '\n';
+    }
+    std::cout << "Current balance: " << balance_ << '\n';
+}
+
+int main()
+{
+    SavingsAccount acct(1001, 5000);
+
+    const long long ops[] = {+1000, -200, +500, -300, +250, -100, +700, -50, +400, -150};
+    for (long long o : ops) {
+        if (o > 0) acct.deposit(o);
+        else       acct.withdraw(-o);
+    }
+    std::cout << "--- after 10 transactions\n";
+    acct.miniStatement();
+
+    acct.deposit(900);     // 11th: oldest (deposit 1000) is discarded
+    acct.withdraw(75);     // 12th: next oldest (withdraw 200) is discarded
+    bool ok = acct.withdraw(1000000);   // overdraft: rejected, not recorded
+    std::cout << "--- after 12 transactions (overdraft accepted? " << std::boolalpha << ok << ")\n";
+    acct.miniStatement();
+
+    std::cout << "sizeof(Transaction)=" << sizeof(Transaction)
+              << " sizeof(SavingsAccount)=" << sizeof(SavingsAccount) << '\n';
+
+#ifdef STRESS
+    for (int i = 0; i < 48; ++i) acct.deposit(10);   // 60 transactions in total
+    std::cout << "sizeof-free check, transactions kept: " << acct.transactionCount() << '\n';
+#endif
+
+#ifdef SHOW_PRIVATE_ERROR
+    acct.balance_ = 1000000;                 // illegal: private
+    std::cout << acct.txn_[0].amount << '\n'; // illegal: private
+#endif
+}
+ALTERNATIVE:
+#include <cstdio>
+#include <iostream>
+
+struct Transaction {
+    char type;
+    long long amount;
+    long long balanceAfter;
+};
+
+// Option A: fixed array, shift everything left when full.
+template <int N> struct ShiftHistory {
+    Transaction t[N] = {};
+    int count = 0;
+    long long copies = 0;
+    void add(const Transaction& x)
+    {
+        if (count < N) { t[count++] = x; ++copies; return; }
+        for (int i = 0; i < N - 1; ++i) { t[i] = t[i + 1]; ++copies; }   // k = N-1 moves
+        t[N - 1] = x; ++copies;
+    }
+};
+
+// Option B: circular buffer with a write index.
+template <int N> struct RingHistory {
+    Transaction t[N] = {};
+    int count = 0, next = 0;
+    long long copies = 0;
+    void add(const Transaction& x)
+    {
+        t[next] = x; ++copies;                // one write, always
+        next = (next + 1) % N;
+        if (count < N) ++count;
+    }
+};
+
+template <int N> void run(const char* label)
+{
+    ShiftHistory<N> s;
+    RingHistory<N> r;
+    for (int i = 1; i <= 1000; ++i) {
+        Transaction x{'D', i, i};
+        s.add(x);
+        r.add(x);
+    }
+    std::cout << label << ": element copies for 1000 transactions: shift=" << s.copies
+              << "  circular=" << r.copies << '\n';
+}
+
+int main()
+{
+    run<10>("N=10");
+    run<50>("N=50");
+}
+Std:(deque)
+#include <deque>
+#include <iomanip>
+#include <iostream>
+
+struct Transaction {
+    char type;
+    long long amount;
+    long long balanceAfter;
+};
+
+class SavingsAccount {
+public:
+    static constexpr std::size_t kMaxTxn = 10;
+
+    explicit SavingsAccount(long long accNo, long long opening = 0)
+        : accNo_(accNo), balance_(opening) {}
+
+    long long balance() const { return balance_; }
+
+    bool deposit(long long amount);
+    bool withdraw(long long amount);
+    void miniStatement() const;
+
+private:
+    void record(char type, long long amount);
+
+    long long accNo_;
+    long long balance_;
+    std::deque<Transaction> txn_;     // push_back / pop_front
+};
+
+bool SavingsAccount::deposit(long long amount)
+{
+    if (amount <= 0) return false;
+    balance_ += amount;
+    record('D', amount);
+    return true;
+}
+
+bool SavingsAccount::withdraw(long long amount)
+{
+    if (amount <= 0 || amount > balance_) return false;
+    balance_ -= amount;
+    record('W', amount);
+    return true;
+}
+
+void SavingsAccount::record(char type, long long amount)
+{
+    txn_.push_back(Transaction{type, amount, balance_});   // O(1)
+    if (txn_.size() > kMaxTxn) txn_.pop_front();            // O(1)
+}
+
+void SavingsAccount::miniStatement() const
+{
+    std::cout << "Mini statement, A/C " << accNo_ << " (last " << txn_.size() << ")\n";
+    int i = 0;
+    for (const Transaction& t : txn_) {
+        std::cout << std::setw(3) << ++i << ". " << t.type << ' ' << std::setw(6) << t.amount
+                  << "  balance " << std::setw(6) << t.balanceAfter << '\n';
+    }
+    std::cout << "Current balance: " << balance_ << '\n';
+}
+
+int main()
+{
+    SavingsAccount acct(1001, 5000);
+
+    const long long ops[] = {+1000, -200, +500, -300, +250, -100, +700, -50, +400, -150};
+    for (long long o : ops) {
+        if (o > 0) acct.deposit(o);
+        else       acct.withdraw(-o);
+    }
+    std::cout << "--- after 10 transactions\n";
+    acct.miniStatement();
+
+    acct.deposit(900);
+    acct.withdraw(75);
+    bool ok = acct.withdraw(1000000);
+    std::cout << "--- after 12 transactions (overdraft accepted? " << std::boolalpha << ok << ")\n";
+    acct.miniStatement();
+}
